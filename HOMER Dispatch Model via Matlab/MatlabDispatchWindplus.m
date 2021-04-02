@@ -416,7 +416,7 @@ function [simulation_state, matlab_simulation_variables] = MatlabDispatch(simula
   
   % charge batteries with excess wind
   % charge batteries with excess wind
-  if (excess_wind_ac > 0)
+  if (excess_wind > 0)
       
       if simulation_parameters.has_converter == true && simulation_parameters.has_battery == true
           [wind_to_batteries, simulation_state] = charge_batteries_ac(simulation_state, simulation_parameters, excess_wind, rect_efficiency);

@@ -2,7 +2,7 @@
 % wind turbine
 % see definition of variables here: https://www.homerenergy.com/products/pro/docs/latest/_listing_of_simulationstate.html
 
-
+function [simulation_state, matlab_simulation_variables] = MatlabDispatch2021(simulation_parameters, simulation_state, matlab_simulation_variables)
 
 
 eps = 0.00001;
@@ -567,5 +567,7 @@ simulation_state.ac_bus.operating_capacity_served      = parameters(indx_min_cos
 simulation_state.ac_bus.unmet_load                     = parameters(indx_min_cost,ac_bus_unmet_load);
 simulation_state.ac_bus.capacity_shortage              = simulation_state.ac_bus.operating_capacity_requested - simulation_state.ac_bus.operating_capacity_served;
           
+end
+
 end
 

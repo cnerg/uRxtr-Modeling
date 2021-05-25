@@ -40,19 +40,12 @@ function [simulation_state, matlab_simulation_variables] = MatlabDispatch2021_v1
 
   
 
-    % function [simulation_state, matlab_simulation_variables] = MatlabDispatch(simulation_parameters, simulation_state, matlab_simulation_variables, eps)
-
     % the matrix
       parameters = zeros(3,14);
 
 
     % we don't have dc load in green case, set all related state variable to 0 
       simulation_state = ignore_dc(simulation_state);
-
-    % define intermediate variables that we do not want to see in model output
-      %battery_max_discharge_power = 0; % NOT USED!!! AC this one is unecessary since we will only compare this value with others when we don't have excess solar
-      %battery_max_charge_power = 0;    % DC
-      %generator_max_possible_output_from_load_and_battery = 0; % AC
 
     % extract rectifier and inverter efficiency
       % PPHW: aren't these defined in HOMER?
@@ -93,18 +86,6 @@ function [simulation_state, matlab_simulation_variables] = MatlabDispatch2021_v1
       excess_wind = avail_wind_power - dispatched_wind_power;
       wind_to_batteries = 0;
 
-    %  % charge batteries with excess wind
-    %  if (excess_wind > 0 )
-    %    net_load_after_wind = 0;
-
-    %    if simulation_parameters.has_converter == true && simulation_parameters.has_battery == true
-    %      [wind_to_batteries, simulation_state] = charge_batteries_ac(simulation_state, simulation_parameters, excess_wind, rect_efficiency);
-    %    end
-
-    %    excess_wind = excess_wind - wind_to_batteries;
-
-    %  end
-
 
       %%% SOLAR PV ENERGY
       %
@@ -121,7 +102,7 @@ function [simulation_state, matlab_simulation_variables] = MatlabDispatch2021_v1
       excess_solar_ac = avail_solar_ac - dispatched_solar_power;
       excess_solar_dc = excess_solar_ac / (inv_efficiency/100);
       solar_to_batteries = 0;
-
+      
 
       % charge the battery using 1-solar and 2-wind
       % charge batteries with excess solar
@@ -135,7 +116,8 @@ function [simulation_state, matlab_simulation_variables] = MatlabDispatch2021_v1
 
           end
 
-
+          
+          
       % charge batteries with excess wind
       % charge batteries with excess wind
           if (excess_wind > 0)
@@ -146,9 +128,10 @@ function [simulation_state, matlab_simulation_variables] = MatlabDispatch2021_v1
               end
 
           end
-          simulation_state = increment_rectifier_load(simulation_state, wind_to_batteries, rect_efficiency);
+          %simulation_state = increment_rectifier_load(simulation_state, wind_to_batteries, rect_efficiency);
       
-     
+          
+          
     %%
     % step 2: decide how to meet net load with remaining solar, generator and battery by marginal cost in $/kWh
 
@@ -169,6 +152,7 @@ function [simulation_state, matlab_simulation_variables] = MatlabDispatch2021_v1
         for option = 1:3
             dispatched_battery_ac = 0;
             battery_charge_power = 0;
+            dispatched_battery_ac = 0;
             dispatched_generator = 0;
             excess_generator = 0;
             ac_to_batteries = 0;
@@ -179,6 +163,8 @@ function [simulation_state, matlab_simulation_variables] = MatlabDispatch2021_v1
             simulation_state.converters(1).rectifier_power_output = rectifier_output_temp;
             simulation_state.batteries(1).power_setpoint = battery_power_setpoint_temp;
 
+            
+            
             %% option 1: dispatch batteries first
             if (option == 1)
                 avail_battery_ac = dispatch_batteries(simulation_state, simulation_parameters, remaining_load, inv_efficiency);
@@ -190,6 +176,7 @@ function [simulation_state, matlab_simulation_variables] = MatlabDispatch2021_v1
             
             % option 1 - reduce load; option 2 & 3 - no effect
             remaining_load = remaining_load - dispatched_battery_ac;
+            
             
 
             %% option 3: determine available battery charging
@@ -203,13 +190,15 @@ function [simulation_state, matlab_simulation_variables] = MatlabDispatch2021_v1
             end
 
             generator_demand = remaining_load + battery_charge_power;
+           
+   
 
             %% dispatch generator next
             if (remaining_load > eps)
                 if (option == 3)
                     avail_generator_power = dispatch_generator(simulation_state, simulation_parameters, generator_demand, eps);
                     dispatched_generator = avail_generator_power;
-                    excess_generator = dispatched_generator - remaining_load;
+                    excess_generator = max(0,dispatched_generator - remaining_load);
                 else
                     avail_generator_power = dispatch_generator(simulation_state, simulation_parameters, remaining_load, eps);
                     dispatched_generator = min(remaining_load, avail_generator_power);
@@ -219,24 +208,18 @@ function [simulation_state, matlab_simulation_variables] = MatlabDispatch2021_v1
                 if (option == 3)
                      avail_generator_power = dispatch_generator(simulation_state, simulation_parameters, generator_demand, eps);
                      dispatched_generator = avail_generator_power;
-                     excess_generator = dispatched_generator - remaining_load;
+                     excess_generator = max(0,dispatched_generator - remaining_load);
                 else
                     avail_generator_power = 0;
                     dispatched_generator = min(remaining_load, avail_generator_power);
                     excess_generator = avail_generator_power - dispatched_generator;
                 end
             end
-%                 if simulation_state.current_timestep == 62+1
-%                     
-%                     disp('  here  ');
-%                     disp(['  excess_gen ',num2str(excess_generator),'=',num2str(avail_generator_power),'-',num2str(dispatched_generator)]);
-%                     disp(['  remaining= ',num2str(remaining_load),'  netloadaftersolar=',num2str(net_load_after_solar),'=',num2str(net_load_after_wind),'-',num2str(dispatched_solar_power)]);
-%                     disp(['  solaravailable= ',num2str(avail_solar_ac)]);
-%                 end
+
             % serve load with generator
             remaining_load = max(0,remaining_load - dispatched_generator);
-            
-                      
+                        
+                           
             
             %% dispatch batteries after generator (option 2 & 3)
             if (remaining_load > eps)
@@ -250,44 +233,15 @@ function [simulation_state, matlab_simulation_variables] = MatlabDispatch2021_v1
             end
             
         
-
+            % charge batter with excess generator
             if (excess_generator > eps)
-%                 if simulation_state.current_timestep == 62+1
-%                    disp('  see excess generator before charging  ');
-%                    %disp([num2str(excess_generator)]);
-%                    %disp([num2str(simulation_parameters.converters(1).rectifier_capacity)]);
-%                    disp([num2str(simulation_state.converters(1).rectifier_power_output)]);
-%                    
-%                 end
                 ac_to_batteries = get_battery_ac_charge_power(simulation_state, simulation_parameters, excess_generator, rect_efficiency);
                 [ac_charging_power, simulation_state] = charge_batteries_ac(simulation_state, simulation_parameters, ac_to_batteries, rect_efficiency);
                 excess_generator = excess_generator - ac_to_batteries;
                 charging_power_ac_to_dc = ac_charging_power * rect_efficiency/100;
-                simulation_state = increment_rectifier_load(simulation_state, charging_power_ac_to_dc, rect_efficiency);
+                %simulation_state = increment_rectifier_load(simulation_state, charging_power_ac_to_dc, rect_efficiency);
 
             end
-            
-%                 if simulation_state.current_timestep == 62+1
-%                     
-%                     disp('  hhhhh  ');
-%                     disp(['  ac_to_batteries ',num2str(ac_to_batteries),'  ac_charging_power',num2str(ac_charging_power),'   excess_generator',num2str(excess_generator)]);
-%                     disp(['  charging_power_ac_to_dc ',num2str(charging_power_ac_to_dc),'  simulation_state.batteries(1).power_setpoint',num2str(simulation_state.batteries(1).power_setpoint)]);
-%                 end
-
-            %net_discharge_ac = dispatched_battery_ac - ac_to_batteries;
-            %net_charge_ac = 0;
-            %if net_discharge_ac < 0
-            %    net_charge_ac = -net_discharge_ac;
-            %    net_discharge_ac = 0;
-            %end
-
-            %net_charge_dc = net_charge_ac * (rect_efficiency/100);
-            %net_discharge_dc = net_discharge_ac / (inv_efficiency/100);
-
-
-            % update inverter and rectifier state
-            %simulation_state = increment_inverter_load(simulation_state, dispatched_battery_ac, inv_efficiency);
-            %simulation_state = increment_rectifier_load(simulation_state, ac_to_batteries, rect_efficiency);
 
 
             parameters(option,generator_power_setpoint) = avail_generator_power;
@@ -300,32 +254,33 @@ function [simulation_state, matlab_simulation_variables] = MatlabDispatch2021_v1
             parameters(option,rectifier_power_input) = simulation_state.converters(1).rectifier_power_input;
             parameters(option,rectifier_power_output) = simulation_state.converters(1).rectifier_power_input * (rect_efficiency/100);         
             parameters(option,primary_load_served) = dispatched_wind_power + dispatched_solar_power + dispatched_battery_ac + dispatched_generator - excess_generator;
-            parameters(option,ac_bus_excess_electricity) = excess_solar_ac + excess_wind + avail_generator_power - dispatched_generator;
+            parameters(option,ac_bus_excess_electricity) = excess_solar_ac + excess_wind + excess_generator;
             parameters(option,ac_bus_load_served) = parameters(option,primary_load_served);
             parameters(option,ac_bus_operating_capacity_requested) = parameters(option,primary_load_served) * ... 
                         (1 + simulation_parameters.operating_reserve.timestep_requirement/100);
             parameters(option,ac_bus_unmet_load) = simulation_state.ac_bus.load_requested - parameters(option,primary_load_served);
             parameters(option,ac_bus_operating_capacity_served) = parameters(option,ac_bus_load_served) + parameters(option,ac_bus_excess_electricity);
             parameters(option,ac_bus_capacity_shortage) = max(0, parameters(option,ac_bus_operating_capacity_requested)- parameters(option,ac_bus_operating_capacity_served));
-        end
+            
         
+        end
 %      %%
 
-    if  (simulation_parameters.has_battery == true && simulation_parameters.has_converter == true)      
+    if  (simulation_parameters.has_battery == true && simulation_parameters.has_converter == true)
       parameters(:,marginal_cost) = ...
-        (matlab_simulation_variables.generator_fuel_cost * parameters(:,generator_power_setpoint))/net_load_after_solar ...
-      + (parameters(:,generator_power_setpoint)>0) * matlab_simulation_variables.generator_OM / net_load_after_solar ...
-      + matlab_simulation_variables.electricity_price * parameters(:,ac_bus_unmet_load)/net_load_after_solar ...
-      + simulation_state.batteries(1).energy_cost * parameters(:,inverter_power_output)/net_load_after_solar ...      % 0 if no batteries
-      + simulation_parameters.batteries(1).wear_cost * parameters(:,inverter_power_output)/net_load_after_solar ...   % 0 if no batteries
-      + simulation_parameters.batteries(1).wear_cost * parameters(:,rectifier_power_input)/net_load_after_solar  ...  % 0 if no batteries
-      + matlab_simulation_variables.electricity_price * parameters(:,inverter_power_output)/net_load_after_solar ...  % 0 if no batteries
-      - matlab_simulation_variables.electricity_price * parameters(:,rectifier_power_input)/net_load_after_solar;     % 0 if no batteries
+        (matlab_simulation_variables.generator_fuel_cost * parameters(:,generator_power_setpoint))/load_requested ...
+      + (parameters(:,generator_power_setpoint)>0) * matlab_simulation_variables.generator_OM / load_requested ...
+      + matlab_simulation_variables.electricity_price * parameters(:,ac_bus_unmet_load)/load_requested ...
+      + simulation_state.batteries(1).energy_cost * parameters(:,inverter_power_output)/load_requested ...      % 0 if no batteries
+      + simulation_parameters.batteries(1).wear_cost * parameters(:,inverter_power_output)/load_requested ...   % 0 if no batteries
+      + simulation_parameters.batteries(1).wear_cost * parameters(:,rectifier_power_input)/load_requested  ...  % 0 if no batteries
+      + matlab_simulation_variables.electricity_price * parameters(:,inverter_power_output)/load_requested ...  % 0 if no batteries
+      - matlab_simulation_variables.electricity_price * parameters(:,rectifier_power_input)/load_requested;     % 0 if no batteries
     else
       parameters(:,marginal_cost) = ...
-        (matlab_simulation_variables.generator_fuel_cost * parameters(:,generator_power_setpoint))/net_load_after_solar ...
-      + (parameters(:,generator_power_setpoint)>0) * matlab_simulation_variables.generator_OM / net_load_after_solar ...
-      + matlab_simulation_variables.electricity_price * parameters(:,ac_bus_unmet_load)/net_load_after_solar;
+        (matlab_simulation_variables.generator_fuel_cost * parameters(:,generator_power_setpoint))/load_requested ...
+      + (parameters(:,generator_power_setpoint)>0) * matlab_simulation_variables.generator_OM / load_requested ...
+      + matlab_simulation_variables.electricity_price * parameters(:,ac_bus_unmet_load)/load_requested;
     end
 
     costs = parameters(:,marginal_cost);
@@ -333,7 +288,6 @@ function [simulation_state, matlab_simulation_variables] = MatlabDispatch2021_v1
    
     indx_min_cost = find(costs == min(costs));
     
-
 
 
     % if there is a tie, always choose the one that charge the battery most
@@ -357,15 +311,7 @@ function [simulation_state, matlab_simulation_variables] = MatlabDispatch2021_v1
     simulation_state.ac_bus.capacity_shortage              = simulation_state.ac_bus.operating_capacity_requested - simulation_state.ac_bus.operating_capacity_served;
 
     
-    %end
 
-    
-    
-    
-    
-    
-    
-    
     
     
     
@@ -393,13 +339,13 @@ function [simulation_state, matlab_simulation_variables] = MatlabDispatch2021_v1
     % ------
     % simulation_state : object holding current state of simulation
     %
-    function simulation_state = ignore_dc(simulation_state)
-        simulation_state.dc_bus.capacity_shortage = 0;
-        simulation_state.dc_bus.excess_electricity = 0;
-        simulation_state.dc_bus.load_served = 0;
-        simulation_state.dc_bus.operating_capacity_served = 0;
-        simulation_state.dc_bus.unmet_load = 0;
-    end
+function simulation_state = ignore_dc(simulation_state)
+    simulation_state.dc_bus.capacity_shortage = 0;
+    simulation_state.dc_bus.excess_electricity = 0;
+    simulation_state.dc_bus.load_served = 0;
+    simulation_state.dc_bus.operating_capacity_served = 0;
+    simulation_state.dc_bus.unmet_load = 0;
+end
 
     % increment the power flowing through the rectifier on both the input and output
     %
@@ -465,16 +411,6 @@ function [simulation_state, matlab_simulation_variables] = MatlabDispatch2021_v1
             max_avail_battery_charge_power = simulation_state.batteries(1).max_charge_power - simulation_state.batteries(1).power_setpoint;
 
             charge_power = min(max_avail_battery_charge_power, dc_power);
-%             if simulation_state.current_timestep == 62+1
-%                 disp('   battery max charge power  ');
-%                 disp(simulation_state.batteries(1).max_charge_power);
-%                 disp('   battery set point  ');
-%                 disp(simulation_state.batteries(1).power_setpoint);
-%                 disp('   max avail bat charge power  ');
-%                 disp(max_avail_battery_charge_power);
-%             end
-                
-             
         end  
     end
 
@@ -501,20 +437,6 @@ function [simulation_state, matlab_simulation_variables] = MatlabDispatch2021_v1
             dc_power_for_charging = min(dc_power, max_avail_rectifier_output);
             dc_charging_power = get_battery_dc_charge_power(simulation_state, simulation_parameters, dc_power_for_charging);
             ac_charging_power_local = dc_charging_power / (rect_efficiency/100);
-                       
-%             if simulation_state.current_timestep == 62+1
-%                    disp('  see dc_power  ');
-%                    disp([num2str(dc_power)]);
-%                    disp('  see dc_power_for charging  ');
-%                    
-%                    %disp([num2str(excess_generator)]);
-%                    %disp([num2str(simulation_parameters.converters(1).rectifier_capacity)]);
-%                    disp([num2str(dc_power_for_charging)]);
-%                    disp('    dc charging power    ');
-%                    disp(num2str(dc_charging_power));
-%                    
-%             end    
-            
         end
     end
 
@@ -691,10 +613,6 @@ function [simulation_state, matlab_simulation_variables] = MatlabDispatch2021_v1
         avail_solar_ac_local = 0;
         if simulation_parameters.has_converter == true
           avail_solar_ac_local = min(simulation_parameters.converters(1).inverter_capacity, avail_solar_dc * inv_efficiency/100);
-%            if (simulation_state_local.current_timestep == 62+1)
-%             %disp(['avail_solar_ac_local modified = ',num2str(avail_solar_ac_local),',inverter cap = ',num2str(simulation_parameters.converters(1).inverter_capacity),', availDC = ',num2str(avail_solar_dc)])
-%             disp(['step',num2str(simulation_state_local.current_timestep-1),'  power avail = ',num2str(simulation_state_local.pvs(1).power_available),'   '])
-%            end
         end
         
 
